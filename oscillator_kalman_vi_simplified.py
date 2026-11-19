@@ -5,6 +5,9 @@ import optax
 from jax.scipy.linalg import expm
 from jax import random, grad, jit
 
+import matplotlib.pyplot as plt
+import numpy as np
+
 # ============================================================
 # Constants
 # ============================================================
@@ -63,9 +66,9 @@ def generate_synthetic_data(
     num_steps,
     dt,
     R,
-    omega0=1.0,
+    omega0=2 * np.pi * 2.0,
     gamma=0.4,
-    temperature=3.0,
+    temperature=300.0,
 ):
     """Simulate noisy position observations from the oscillator model."""
     F, _ = discretize_system(omega0, gamma, temperature, dt)
@@ -145,13 +148,13 @@ def kalman_filter(y, F, Q, R):
 
 def init_variational_params():
     return {
-        "mu_log_omega0": jnp.array(0.0),
+        "mu_log_omega0": jnp.array(jnp.log(2 * np.pi)),
         "rho_log_omega0": jnp.array(-3.0),
 
-        "mu_log_gamma": jnp.array(-1.0),
+        "mu_log_gamma": jnp.array(jnp.log(0.2)),
         "rho_log_gamma": jnp.array(-3.0),
 
-        "mu_log_T": jnp.array(1.0),
+        "mu_log_T": jnp.array(jnp.log(300.0)),
         "rho_log_T": jnp.array(-3.0),
     }
 
@@ -290,11 +293,24 @@ y = generate_synthetic_data(
     R=R,
 )
 
+time = np.arange(y.shape[0]) * dt
+
+plt.figure(figsize=(10, 4))
+plt.plot(time, np.asarray(y), linewidth=1)
+plt.xlabel("Time (s)")
+plt.ylabel("Position")
+plt.title("Synthetic oscillator observations")
+plt.grid(True)
+plt.tight_layout()
+plt.show()
+
+# exit()
+
 params = init_variational_params()
 optimizer = optax.adam(1e-2)
 opt_state = optimizer.init(params)
 
-for step in range(5000):
+for step in range(1000):
     key, subkey = random.split(key)
     params, opt_state, loss = train_step(
         params,
