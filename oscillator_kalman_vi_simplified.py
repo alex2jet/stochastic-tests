@@ -307,10 +307,17 @@ plt.show()
 # exit()
 
 params = init_variational_params()
-optimizer = optax.adam(1e-2)
+schedule = optax.exponential_decay(
+    init_value=1e-2,
+    transition_steps=200,
+    decay_rate=0.7,
+    staircase=True,
+    end_value=1e-4,
+)
+optimizer = optax.adam(learning_rate=schedule)
 opt_state = optimizer.init(params)
 
-for step in range(1000):
+for step in range(2000):
     key, subkey = random.split(key)
     params, opt_state, loss = train_step(
         params,
@@ -325,19 +332,31 @@ for step in range(1000):
         omega_est = jnp.exp(
             params["mu_log_omega0"]
         )
+        omega_rho = jnp.exp(
+            params["rho_log_omega0"]
+        )
 
         gamma_est = jnp.exp(
             params["mu_log_gamma"]
         )
+        gamma_rho = jnp.exp(
+            params["rho_log_gamma"]
+        )
 
         T_est = jnp.exp(
             params["mu_log_T"]
+        )
+        T_rho = jnp.exp(
+            params["rho_log_T"]
         )
 
         print(
             step,
             loss,
             omega_est,
+            omega_rho,
             gamma_est,
-            T_est
+            gamma_rho,
+            T_est,
+            T_rho,
         )
