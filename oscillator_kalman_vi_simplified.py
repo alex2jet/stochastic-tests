@@ -46,7 +46,6 @@ def discretize_system(omega0, gamma, temperature, dt):
     # Approximate Q using midpoint rule
     # Better: Van Loan method
     M = expm(A * dt / 2.0)
-
     Q = dt * (M @ B @ B.T @ M.T)
 
     return F, Q
@@ -59,7 +58,6 @@ def discretize_system(omega0, gamma, temperature, dt):
 def kalman_filter(y, F, Q, R):
 
     H = jnp.array([[1.0, 0.0]])
-
     T = y.shape[0]
 
     # initial state
@@ -72,26 +70,21 @@ def kalman_filter(y, F, Q, R):
     filtered_covs = []
 
     for t in range(T):
-
         # Prediction
         m_pred = F @ m
         P_pred = F @ P @ F.T + Q
 
         # Innovation
         S = H @ P_pred @ H.T + R
-
         K = P_pred @ H.T @ jnp.linalg.inv(S)
-
         residual = y[t] - H @ m_pred
 
         # Update
         m = m_pred + (K @ residual).reshape(-1)
-
         P = P_pred - K @ H @ P_pred
 
         # Log likelihood
         logdetS = jnp.log(S[0, 0])
-
         quad = residual.T @ jnp.linalg.inv(S) @ residual
 
         loglik += -0.5 * (
@@ -115,7 +108,6 @@ def kalman_filter(y, F, Q, R):
 # ============================================================
 
 def init_variational_params():
-
     return {
         "mu_log_omega0": jnp.array(0.0),
         "rho_log_omega0": jnp.array(-3.0),
@@ -179,7 +171,6 @@ def sample_params(params, key):
 # ============================================================
 
 def gaussian_kl(mu, rho):
-
     sigma = softplus(rho)
 
     return 0.5 * (
@@ -195,7 +186,6 @@ def gaussian_kl(mu, rho):
 # ============================================================
 
 def elbo(params, y, dt, R, key):
-
     omega0, gamma, temperature = sample_params(params, key)
 
     F, Q = discretize_system(
@@ -233,9 +223,7 @@ def elbo(params, y, dt, R, key):
 
 @jit
 def train_step(params, opt_state, y, dt, R, key):
-
     loss_fn = lambda p: -elbo(p, y, dt, R, key)
-
     grads = grad(loss_fn)(params)
 
     updates, opt_state = optimizer.update(
@@ -244,7 +232,6 @@ def train_step(params, opt_state, y, dt, R, key):
     )
 
     params = optax.apply_updates(params, updates)
-
     loss = loss_fn(params)
 
     return params, opt_state, loss
@@ -260,19 +247,14 @@ R = jnp.array([[1e-4]])
 # observed data
 # shape: (T,)
 y = jnp.load("trajectory.npy")
-
 params = init_variational_params()
-
 optimizer = optax.adam(1e-2)
-
 opt_state = optimizer.init(params)
 
 key = random.PRNGKey(0)
 
 for step in range(5000):
-
     key, subkey = random.split(key)
-
     params, opt_state, loss = train_step(
         params,
         opt_state,
@@ -283,7 +265,6 @@ for step in range(5000):
     )
 
     if step % 100 == 0:
-
         omega_est = jnp.exp(
             params["mu_log_omega0"]
         )
