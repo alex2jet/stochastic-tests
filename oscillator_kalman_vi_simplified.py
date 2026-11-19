@@ -3,13 +3,16 @@ import jax.numpy as jnp
 import optax
 
 from jax.scipy.linalg import expm
-from jax import random, grad, jit, vmap
+from jax import random, grad, jit
 
 # ============================================================
 # Constants
 # ============================================================
 
 kB = 1.380649e-23
+# A small oscillator mass keeps the thermal displacement on the scale of the
+# observation noise used in this example.
+MASS = 1e-20
 
 # ============================================================
 # State-space construction
@@ -22,7 +25,7 @@ def build_A(omega0, gamma):
     ])
 
 
-def build_B(gamma, temperature, mass=1.0):
+def build_B(gamma, temperature, mass=MASS):
     sigma = jnp.sqrt(2.0 * gamma * kB * temperature / mass)
 
     return jnp.array([
@@ -52,24 +55,53 @@ def discretize_system(omega0, gamma, temperature, dt):
 
 
 # ============================================================
+# Synthetic observations
+# ============================================================
+
+def generate_synthetic_data(
+    key,
+    num_steps,
+    dt,
+    R,
+    omega0=1.0,
+    gamma=0.4,
+    temperature=3.0,
+):
+    """Simulate noisy position observations from the oscillator model."""
+    F, _ = discretize_system(omega0, gamma, temperature, dt)
+
+    # The midpoint process covariance has the form g @ g.T, so sampling one
+    # scalar normal per step produces process noise with exactly that covariance.
+    A = build_A(omega0, gamma)
+    B = build_B(gamma, temperature)
+    M = expm(A * dt / 2.0)
+    process_noise_scale = (jnp.sqrt(dt) * M @ B).reshape(2,)
+
+    process_key, observation_key = random.split(key)
+    process_noise = random.normal(process_key, (num_steps,))
+    observation_noise = random.normal(observation_key, (num_steps,)) * jnp.sqrt(R[0, 0])
+
+    def step(state, noise):
+        state = F @ state + process_noise_scale * noise
+        return state, state[0]
+
+    _, positions = jax.lax.scan(step, jnp.zeros((2,)), process_noise)
+    return positions + observation_noise
+
+
+# ============================================================
 # Kalman filter
 # ============================================================
 
 def kalman_filter(y, F, Q, R):
 
     H = jnp.array([[1.0, 0.0]])
-    T = y.shape[0]
 
     # initial state
-    m = jnp.zeros((2,))
-    P = jnp.eye(2)
+    initial_state = (jnp.zeros((2,)), jnp.eye(2), 0.0)
 
-    loglik = 0.0
-
-    filtered_means = []
-    filtered_covs = []
-
-    for t in range(T):
+    def filter_step(carry, observation):
+        m, P, loglik = carry
         # Prediction
         m_pred = F @ m
         P_pred = F @ P @ F.T + Q
@@ -77,7 +109,7 @@ def kalman_filter(y, F, Q, R):
         # Innovation
         S = H @ P_pred @ H.T + R
         K = P_pred @ H.T @ jnp.linalg.inv(S)
-        residual = y[t] - H @ m_pred
+        residual = observation - H @ m_pred
 
         # Update
         m = m_pred + (K @ residual).reshape(-1)
@@ -93,13 +125,17 @@ def kalman_filter(y, F, Q, R):
             jnp.log(2.0 * jnp.pi)
         )
 
-        filtered_means.append(m)
-        filtered_covs.append(P)
+        return (m, P, loglik), (m, P)
 
+    (_, _, loglik), (filtered_means, filtered_covs) = jax.lax.scan(
+        filter_step,
+        initial_state,
+        y,
+    )
     return (
         loglik,
-        jnp.stack(filtered_means),
-        jnp.stack(filtered_covs)
+        filtered_means,
+        filtered_covs,
     )
 
 
@@ -244,14 +280,19 @@ def train_step(params, opt_state, y, dt, R, key):
 dt = 0.01
 R = jnp.array([[1e-4]])
 
-# observed data
-# shape: (T,)
-y = jnp.load("trajectory.npy")
+# Generate observations in memory (shape: (T,)); no intermediate file is used.
+key = random.PRNGKey(0)
+data_key, key = random.split(key)
+y = generate_synthetic_data(
+    data_key,
+    num_steps=1000,
+    dt=dt,
+    R=R,
+)
+
 params = init_variational_params()
 optimizer = optax.adam(1e-2)
 opt_state = optimizer.init(params)
-
-key = random.PRNGKey(0)
 
 for step in range(5000):
     key, subkey = random.split(key)
